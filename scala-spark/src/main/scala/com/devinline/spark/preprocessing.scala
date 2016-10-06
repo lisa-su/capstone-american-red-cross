@@ -6,12 +6,12 @@ import org.apache.spark.rdd.RDD.rddToPairRDDFunctions
 import net.liftweb.json._
 
 
-object TransformData {
+object preprocessing {
   case class field_dtype(field: String, dtype: String)
   case class DataTypeInvalidException(smth:String)  extends Exception(smth)
   val get_year = new java.text.SimpleDateFormat("yyyy") 
   
-  def parse_dtype(schema: JValue): List[TransformData.field_dtype] = {
+  def parse_dtype(schema: JValue): List[preprocessing.field_dtype] = {
     val fields = for {
       JArray(fields) <- schema \ "fields"
       JObject(field) <- fields
@@ -35,7 +35,7 @@ object TransformData {
       throw new Exception()
     }
     
-    def validate(x: (String, TransformData.field_dtype) ): Any = { // x: (value, field_dtype)
+    def validate(x: (String, preprocessing.field_dtype) ): Any = { // x: (value, field_dtype)
       var new_x = x._1.trim()
       val d = x._2
       if (null_val.contains(new_x.toLowerCase()) || new_x == null) {
@@ -85,7 +85,7 @@ object TransformData {
   def main(args: Array[String]) = {
     //Start the Spark context
     val conf = new SparkConf()
-      .setAppName("TransformData")
+      .setAppName("preprocessing")
       .setMaster("local")
     val sc = new SparkContext(conf)
 

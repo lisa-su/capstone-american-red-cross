@@ -1,9 +1,9 @@
-package com.devinline.spark
+package sample
 import org.apache.spark.SparkConf
 import org.apache.spark.SparkContext
 import org.apache.spark.rdd.RDD.rddToPairRDDFunctions
 
-object WordCount {
+object WordCountExample {
   def main(args: Array[String]) = {
 
     //Start the Spark context
