@@ -1,4 +1,4 @@
-package com.devinline.spark
+package com.myapp.arc
 import java.util.Date
 import org.apache.spark.SparkConf
 import org.apache.spark.SparkContext
