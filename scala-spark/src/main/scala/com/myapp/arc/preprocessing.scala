@@ -1,8 +1,12 @@
 package com.myapp.arc
+
 import java.util.Date
+import org.apache.spark.rdd.RDD.rddToPairRDDFunctions
 import org.apache.spark.SparkConf
 import org.apache.spark.SparkContext
-import org.apache.spark.rdd.RDD.rddToPairRDDFunctions
+import org.apache.spark.sql.SQLContext
+import org.apache.spark.sql.Row
+import org.apache.spark.sql.types._
 import net.liftweb.json._
 
 
@@ -20,6 +24,30 @@ object preprocessing {
     } yield field_dtype(name, dtype)
     
     return fields
+  
+  } 
+  
+  def get_datatype(dtype: String): DataType = {
+    if (dtype.equals("integer")){
+      return IntegerType
+    } else if (dtype.equals("float")) {
+      return FloatType
+    } else if (dtype.equals("date")) {
+      return DateType
+    } else if (dtype.equals("boolean")) {
+      return BooleanType
+    } else {
+      return StringType
+    }
+    
+  }
+  
+  def create_structtype(schema: JValue): StructType = {
+    val fields = parse_dtype(schema)
+    val struct_schema = StructType(fields.map { x => StructField(x.field, get_datatype(x.dtype), true) })
+    
+    
+    return struct_schema
   }
   
   def clean(row: Array[String], schema: JValue): Array[_] = {
@@ -52,10 +80,13 @@ object preprocessing {
             return new_x.toFloat
           } else if (d.dtype == "date" && new_x.contains("-")) {
             val format = new java.text.SimpleDateFormat("yyyy-MM-dd")
-            return format.parse(new_x)
+//            val date = new java.sql.Date(format.parse(new_x).getDate)
+            val date = java.sql.Date.valueOf(new_x)
+            return date
           } else if (d.dtype == "date" && new_x.contains("/")) {
             val format = new java.text.SimpleDateFormat("yyyy/MM/dd")
-            return format.parse(new_x)
+            val date = new java.sql.Date(format.parse(new_x).getDate)
+            return date
           } else {
             throw new DataTypeInvalidException("\n------\n" + d + "\nvalue: " + x + "\n------")
           }
@@ -66,18 +97,31 @@ object preprocessing {
     }
     val matched = row zip fields
     var new_row = for { m <- matched} yield validate(m)
-    return new_row
-  }
-  
-  def is_repeat_donor(row: Array[_], onetime: Array[_], repeat: Array[_]): Array[Any] = {
-    val this_id = row.toList(0)
     
-    if (onetime contains this_id) {
-      return row :+ 0
-    } else if (repeat contains this_id) {
-      return row :+ 1
-    } else {
-      return row :+ null
+    return new_row
+  
+  } 
+  
+  def is_repeat_donor(row: Array[_], donate_count: Array[(Any, Int)]): Array[_] = {
+    val this_id = row.toList(0)
+    val this_donor_cnt = donate_count.filter(p => this_id.equals(p._1))
+    try {
+      if (this_donor_cnt(0)._2 > 1){
+        return row :+ this_donor_cnt(0)._2 :+ 1
+      } else if (this_donor_cnt(0)._2 == 1) {
+        return row :+ this_donor_cnt(0)._2 :+ 0
+      } else {
+        return row :+ null :+ null
+      }
+    } catch{
+      case e: java.lang.ArrayIndexOutOfBoundsException => {
+        println("=====Caught ArrayIndexOutOfBoundsException here!=====")
+        println("this_donor_cnt length = " + this_donor_cnt.length)
+        if (this_donor_cnt.length > 0 ){
+          println(this_donor_cnt.deep.mkString(","))
+        }
+        return row :+ null :+ null
+        }
     }
   
   }
@@ -103,15 +147,18 @@ object preprocessing {
     val summary_schema_string = try summary_schema_source.mkString finally summary_schema_source.close()
     val summary_schema = parse(summary_schema_string)
     
+    //Split the lines with comma
     var data_splitted = data.filter { line => line != data_header }
     .map { line => line.split(",") }
     .map { row => clean(row, states_schema) }
     var summary_data_splitted = summary_data.filter { line => line != summary_header }
     .map { line => line.split(",") }
     .map { row => clean(row, summary_schema) }
+    .map { x => Row.fromSeq(x.toSeq) }
    
     // Create a list of arc_id that the donor has activity after 2000
-    val donor_after_2000 = data_splitted.filter { row => get_year.format((row(1))).toInt >= 2000}
+    val donor_after_2000 = data_splitted
+    .filter { row => row(1).asInstanceOf[java.sql.Date].toLocalDate().getYear >= 2000}
     .map { row => row(0) }.collect() 
     
     // data of donors that have activities after 2000
@@ -119,20 +166,39 @@ object preprocessing {
     
     //Count times of donations by arc_id
     val donate_cnt = data_after_2000.map { line => (line(0), 1) }.reduceByKey(_ + _) //Sum all of the value with same key
+    val donate_cnt_collected = donate_cnt.collect()
+    
     //Save arc_id into separate lists of repeat donor and one-time donor
     val repeat_donor = donate_cnt.filter(v => v._2 > 1 ).map(v => v._1)
-    repeat_donor.saveAsTextFile("data/repeat_donor_list")
     val onetime_donor = donate_cnt.filter(v => v._2 == 1 ).map(v => v._1)
-    onetime_donor.saveAsTextFile("data/onetime_donor_list")
-    
-    val repeat_donor_sample = repeat_donor.sample(false, 0.01, 100)
-    val repeat_donor_array = repeat_donor_sample.collect()
-    val onetime_donor_sample = onetime_donor.sample(false, 0.01, 100)
-    val onetime_donor_array = onetime_donor_sample.collect()
+    // TODO: Uncomment following 2 lines to save the donor acr id list
+    // repeat_donor.saveAsTextFile("data/repeat_donor_list")
+    // onetime_donor.saveAsTextFile("data/onetime_donor_list")
+     
+    // Get lists of sample repeat and one-time donor 
+    val repeat_donor_array = repeat_donor.sample(false, 0.01, 100).collect()
+    val onetime_donor_array = onetime_donor.sample(false, 0.01, 100).collect()
     val sample_donors = repeat_donor_array ++ onetime_donor_array
-    var sample_data = data_after_2000.filter { row => sample_donors.contains(row(0)) }.map { x => is_repeat_donor(x, onetime_donor_array, repeat_donor_array) }
     
-    sample_data.map { x => x.mkString(",") }.saveAsTextFile("data/sample_data")
+    // Create sample data and added is repeat donor and total donation count column
+    val sample_data = data_after_2000.filter { row => sample_donors.contains(row(0)) }
+    .map { x => is_repeat_donor(x, donate_cnt_collected) }
+    .map { x => Row.fromSeq(x.toSeq) }
+    // TODO: Uncomment this line to save the sample data
+    // sample_data.map { x => x.mkString(",") }.saveAsTextFile("data/sample_data")
+    
+    // Conver rdd to dataframe
+    val sqlcontext = new org.apache.spark.sql.SQLContext(sc)
+    import sqlcontext.implicits._
+    
+    // convert the schema JSON to StructType schema and add donation_cnt and repeat_donor for states data
+    val final_states_schema = create_structtype(states_schema)
+    .add(StructField("donation_cnt", IntegerType, true))
+    .add(StructField("repeat_donor", IntegerType, true))
+    val sample_data_df = sqlcontext.createDataFrame(sample_data, final_states_schema)
+    val summary_data_df = sqlcontext.createDataFrame(summary_data_splitted, create_structtype(summary_schema))
+    
+    
 
     //Stop the Spark context
     sc.stop
