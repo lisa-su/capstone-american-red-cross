@@ -126,20 +126,32 @@ object preprocessing {
   
   }
   
+  def cal_age_at_donation(donation_dt: java.sql.Date, birth_dt: java.sql.Date): Float = {
+    if (donation_dt != null && birth_dt != null) {
+      return (donation_dt.getTime - donation_dt.getTime) / (1000 * 60 * 60 * 24 * 365)
+    } else {
+      return 0  
+    }
+    
+  }
+        
+        
+  
   def main(args: Array[String]) = {
     //Start the Spark context
     val conf = new SparkConf()
       .setAppName("preprocessing")
       .setMaster("local")
     val sc = new SparkContext(conf)
-
-    //Read some example file to a data RDD
+    
+    //------- Read some example file to a data RDD -------
+    //TODO: change the data source when running on the cluster
     val data = sc.textFile("data/state13_first_1k.csv")
     val data_header = data.first()
     val summary_data = sc.textFile("data/summary_first_1k.csv")
     val summary_header = summary_data.first()
     
-    //Load schemas for datasets
+    //------- Load schemas for datasets -------
     val states_schema_source = scala.io.Source.fromFile("data/states_schema.json")
     val states_schema_string = try states_schema_source.mkString finally states_schema_source.close()
     val states_schema = parse(states_schema_string)
@@ -147,7 +159,7 @@ object preprocessing {
     val summary_schema_string = try summary_schema_source.mkString finally summary_schema_source.close()
     val summary_schema = parse(summary_schema_string)
     
-    //Split the lines with comma
+    //------- Split the lines with comma, change the delimeter if needed -------
     var data_splitted = data.filter { line => line != data_header }
     .map { line => line.split(",") }
     .map { row => clean(row, states_schema) }
@@ -156,21 +168,23 @@ object preprocessing {
     .map { row => clean(row, summary_schema) }
     .map { x => Row.fromSeq(x.toSeq) }
    
-    // Create a list of arc_id that the donor has activity after 2000
+    //-------Create a list of arc_id that the donor has activity after 2000-------
+    //TODO: Currently only works for subtracting data after YYYY and it can also running through loops to create subsets
     val donor_after_2000 = data_splitted
     .filter { row => row(1).asInstanceOf[java.sql.Date].toLocalDate().getYear >= 2000}
     .map { row => row(0) }.collect() 
     
-    // data of donors that have activities after 2000
+    //-------Preparing data of donors that have activities after 2000-------
     var data_after_2000 = data_splitted.filter( row => donor_after_2000.contains(row(0)))
     
-    //Count times of donations by arc_id
+    // Count times of donations by arc_id
     val donate_cnt = data_after_2000.map { line => (line(0), 1) }.reduceByKey(_ + _) //Sum all of the value with same key
     val donate_cnt_collected = donate_cnt.collect()
     
-    //Save arc_id into separate lists of repeat donor and one-time donor
+    // Save arc_id into separate lists of repeat donor and one-time donor
     val repeat_donor = donate_cnt.filter(v => v._2 > 1 ).map(v => v._1)
     val onetime_donor = donate_cnt.filter(v => v._2 == 1 ).map(v => v._1)
+    
     // TODO: Uncomment following 2 lines to save the donor acr id list
     // repeat_donor.saveAsTextFile("data/repeat_donor_list")
     // onetime_donor.saveAsTextFile("data/onetime_donor_list")
@@ -180,26 +194,50 @@ object preprocessing {
     val onetime_donor_array = onetime_donor.sample(false, 0.01, 100).collect()
     val sample_donors = repeat_donor_array ++ onetime_donor_array
     
-    // Create sample data and added is repeat donor and total donation count column
+    //-------Create sample data and added is repeat donor and total donation count column-------
     val sample_data = data_after_2000.filter { row => sample_donors.contains(row(0)) }
     .map { x => is_repeat_donor(x, donate_cnt_collected) }
     .map { x => Row.fromSeq(x.toSeq) }
+    
     // TODO: Uncomment this line to save the sample data
     // sample_data.map { x => x.mkString(",") }.saveAsTextFile("data/sample_data")
     
-    // Conver rdd to dataframe
+    //-------Use SQL to merge states and summary data----
     val sqlcontext = new org.apache.spark.sql.SQLContext(sc)
     import sqlcontext.implicits._
     
-    // convert the schema JSON to StructType schema and add donation_cnt and repeat_donor for states data
+    // Convert the schema JSON to StructType schema and add donation_cnt and repeat_donor for states data
     val final_states_schema = create_structtype(states_schema)
     .add(StructField("donation_cnt", IntegerType, true))
     .add(StructField("repeat_donor", IntegerType, true))
-    val sample_data_df = sqlcontext.createDataFrame(sample_data, final_states_schema)
-    val summary_data_df = sqlcontext.createDataFrame(summary_data_splitted, create_structtype(summary_schema))
-    
-    
 
+    // Convert rdd to dataframe
+    // TODO: change states_df's source RDD, now is sample_data, if need to use whole states data or other subsets
+    val states_df = sqlcontext.createDataFrame(sample_data, final_states_schema)
+    val summary_df = sqlcontext.createDataFrame(summary_data_splitted, create_structtype(summary_schema))
+    // Register the data frames as tables
+    states_df.registerTempTable("states")
+    summary_df.registerTempTable("summary")
+    
+    val select_useful_summary = "SELECT arc_id AS summary_id, birth_dt, race, gender, zip5c FROM summary"
+    val useful_summary_df = sqlcontext.sql(select_useful_summary)
+    
+    // Join states and summary data
+    var states_summary_df = states_df.join(useful_summary_df, states_df("arc_id") === useful_summary_df("summary_id"), "left_outer")
+    .drop("summary_id")
+   
+    // Define udf for calculating the age at donation
+    import org.apache.spark.sql.functions.udf
+
+    val udf_cal_age_at_donation= udf((donation_dt: java.sql.Date, birth_dt: java.sql.Date) => 
+      cal_age_at_donation(donation_dt, birth_dt))
+
+    // Add new column "age_at_donation" to the dataframe 
+    states_summary_df = states_summary_df.withColumn("age_at_donation", udf_cal_age_at_donation(states_summary_df("donation_dt"), states_summary_df("birth_dt")))
+    // TODO: Uncomment the following line if need to save mixed dataset
+    // states_summary_df.repartition(1).write.format("com.databricks.spark.csv").option("header", "true").save("data/sample_data_mixed")
+    
+       
     //Stop the Spark context
     sc.stop
   }
