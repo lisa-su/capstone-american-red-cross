@@ -13,8 +13,9 @@ import net.liftweb.json._
 object preprocessing {
   case class field_dtype(field: String, dtype: String)
   case class DataTypeInvalidException(smth:String)  extends Exception(smth)
-  val get_year = new java.text.SimpleDateFormat("yyyy") 
-  
+   
+ 
+  //------- Function to parse schema JSON object to field_dtype(field_name, dtype) -------
   def parse_dtype(schema: JValue): List[preprocessing.field_dtype] = {
     val fields = for {
       JArray(fields) <- schema \ "fields"
@@ -24,9 +25,9 @@ object preprocessing {
     } yield field_dtype(name, dtype)
     
     return fields
-  
   } 
   
+  //------- Function that will return DateType by specified string -------
   def get_datatype(dtype: String): DataType = {
     if (dtype.equals("integer")){
       return IntegerType
@@ -39,17 +40,17 @@ object preprocessing {
     } else {
       return StringType
     }
-    
   }
   
+  //------- Function that uses the schema JSON to create StructType -------
   def create_structtype(schema: JValue): StructType = {
     val fields = parse_dtype(schema)
     val struct_schema = StructType(fields.map { x => StructField(x.field, get_datatype(x.dtype), true) })
-    
-    
+
     return struct_schema
   }
   
+  //------- Function to convert the columns to right data types by schema -------
   def clean(row: Array[String], schema: JValue): Array[_] = {
     val null_val = List("na", "none", "")
     val fields = parse_dtype(schema)
@@ -78,14 +79,8 @@ object preprocessing {
             return new_x.toInt
           } else if (d.dtype == "float") {
             return new_x.toFloat
-          } else if (d.dtype == "date" && new_x.contains("-")) {
-            val format = new java.text.SimpleDateFormat("yyyy-MM-dd")
-//            val date = new java.sql.Date(format.parse(new_x).getDate)
+          } else if (d.dtype == "date") {
             val date = java.sql.Date.valueOf(new_x)
-            return date
-          } else if (d.dtype == "date" && new_x.contains("/")) {
-            val format = new java.text.SimpleDateFormat("yyyy/MM/dd")
-            val date = new java.sql.Date(format.parse(new_x).getDate)
             return date
           } else {
             throw new DataTypeInvalidException("\n------\n" + d + "\nvalue: " + x + "\n------")
@@ -99,9 +94,9 @@ object preprocessing {
     var new_row = for { m <- matched} yield validate(m)
     
     return new_row
-  
   } 
   
+  //------- Function to create the indicator of repeat donor -------
   def is_repeat_donor(row: Array[_], donate_count: Array[(Any, Int)]): Array[_] = {
     val this_id = row.toList(0)
     val this_donor_cnt = donate_count.filter(p => this_id.equals(p._1))
@@ -126,6 +121,7 @@ object preprocessing {
   
   }
   
+  //------- Function to calculate the donor's age at respective donation -------
   def cal_age_at_donation(donation_dt: java.sql.Date, birth_dt: java.sql.Date): Float = {
     if (donation_dt != null && birth_dt != null) {
       return (donation_dt.getTime - donation_dt.getTime) / (1000 * 60 * 60 * 24 * 365)
@@ -236,7 +232,7 @@ object preprocessing {
     states_summary_df = states_summary_df.withColumn("age_at_donation", udf_cal_age_at_donation(states_summary_df("donation_dt"), states_summary_df("birth_dt")))
     // TODO: Uncomment the following line if need to save mixed dataset
     // states_summary_df.repartition(1).write.format("com.databricks.spark.csv").option("header", "true").save("data/sample_data_mixed")
-    
+
        
     //Stop the Spark context
     sc.stop
