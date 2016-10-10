@@ -79,8 +79,13 @@ object preprocessing {
             return new_x.toInt
           } else if (d.dtype == "float") {
             return new_x.toFloat
-          } else if (d.dtype == "date") {
+          } else if (d.dtype == "date" && new_x.contains("-")) {
+            val format = new java.text.SimpleDateFormat("yyyy-MM-dd")
             val date = java.sql.Date.valueOf(new_x)
+            return date
+          } else if (d.dtype == "date" && new_x.contains("/")) {
+            val format = new java.text.SimpleDateFormat("yyyy/MM/dd")
+            val date = new java.sql.Date(format.parse(new_x).getDate)
             return date
           } else {
             throw new DataTypeInvalidException("\n------\n" + d + "\nvalue: " + x + "\n------")
@@ -128,9 +133,20 @@ object preprocessing {
     } else {
       return 0  
     }
-    
   }
-        
+
+  //------- Function to count the order of the donation from the same donor -------
+  var id = ""
+  var cnt = 0
+  def cnt_donate_order(this_id: String): Integer = {
+      if (!this_id.equals(id)) {
+        id = this_id.toString()
+        cnt = 1
+      } else {
+        cnt += 1
+      }      
+    return cnt
+  }
         
   
   def main(args: Array[String]) = {
@@ -140,23 +156,28 @@ object preprocessing {
       .setMaster("local")
     val sc = new SparkContext(conf)
     
+    val states_path = args(0)
+    val summary_path = args(1)
+    val schemas_folder = args(2)
+    val output_path = args(3) 
+    
     //------- Read some example file to a data RDD -------
-    //TODO: change the data source when running on the cluster
-    val data = sc.textFile("data/state13_first_1k.csv")
+    val data = sc.textFile(states_path)
     val data_header = data.first()
-    val summary_data = sc.textFile("data/summary_first_1k.csv")
+    val summary_data = sc.textFile(summary_path)
     val summary_header = summary_data.first()
     
     //------- Load schemas for datasets -------
-    val states_schema_source = scala.io.Source.fromFile("data/states_schema.json")
+    val states_schema_source = scala.io.Source.fromFile(schemas_folder + "states_schema.json")
     val states_schema_string = try states_schema_source.mkString finally states_schema_source.close()
     val states_schema = parse(states_schema_string)
-    val summary_schema_source = scala.io.Source.fromFile("data/summary_schema.json")
+    val summary_schema_source = scala.io.Source.fromFile(schemas_folder + "summary_schema.json")
     val summary_schema_string = try summary_schema_source.mkString finally summary_schema_source.close()
     val summary_schema = parse(summary_schema_string)
     
     //------- Split the lines with comma, change the delimeter if needed -------
-    var data_splitted = data.filter { line => line != data_header }
+    var data_splitted = data
+    .filter { line => line != data_header }
     .map { line => line.split(",") }
     .map { row => clean(row, states_schema) }
     var summary_data_splitted = summary_data.filter { line => line != summary_header }
@@ -186,13 +207,14 @@ object preprocessing {
     // onetime_donor.saveAsTextFile("data/onetime_donor_list")
      
     // Get lists of sample repeat and one-time donor 
-    val repeat_donor_array = repeat_donor.sample(false, 0.01, 100).collect()
-    val onetime_donor_array = onetime_donor.sample(false, 0.01, 100).collect()
+    val repeat_donor_array = repeat_donor.sample(false, .01, 100).collect()
+    val onetime_donor_array = onetime_donor.sample(false, .01, 100).collect()
     val sample_donors = repeat_donor_array ++ onetime_donor_array
     
-    //-------Create sample data and added is repeat donor and total donation count column-------
+    //-------Create sample data and added is repeat donor, total donation count, and donation order column-------
     val sample_data = data_after_2000.filter { row => sample_donors.contains(row(0)) }
     .map { x => is_repeat_donor(x, donate_cnt_collected) }
+    .map { x => (x.toSeq :+ cnt_donate_order(x(0).toString()))}
     .map { x => Row.fromSeq(x.toSeq) }
     
     // TODO: Uncomment this line to save the sample data
@@ -206,6 +228,7 @@ object preprocessing {
     val final_states_schema = create_structtype(states_schema)
     .add(StructField("donation_cnt", IntegerType, true))
     .add(StructField("repeat_donor", IntegerType, true))
+    .add(StructField("donation_order", IntegerType, true))
 
     // Convert rdd to dataframe
     // TODO: change states_df's source RDD, now is sample_data, if need to use whole states data or other subsets
@@ -227,13 +250,15 @@ object preprocessing {
 
     val udf_cal_age_at_donation= udf((donation_dt: java.sql.Date, birth_dt: java.sql.Date) => 
       cal_age_at_donation(donation_dt, birth_dt))
+      
+    val udf_cnt_donate_order = udf((id: String) => cnt_donate_order(id))
 
     // Add new column "age_at_donation" to the dataframe 
     states_summary_df = states_summary_df.withColumn("age_at_donation", udf_cal_age_at_donation(states_summary_df("donation_dt"), states_summary_df("birth_dt")))
+    
     // TODO: Uncomment the following line if need to save mixed dataset
-    // states_summary_df.repartition(1).write.format("com.databricks.spark.csv").option("header", "true").save("data/sample_data_mixed")
-
-       
+    states_summary_df.repartition(1).write.format("com.databricks.spark.csv").option("header", "true").save("data/sample_data_1_percent_after2000")
+           
     //Stop the Spark context
     sc.stop
   }
