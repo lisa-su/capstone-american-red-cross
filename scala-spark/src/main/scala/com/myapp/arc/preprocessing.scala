@@ -153,7 +153,7 @@ object preprocessing {
     //Start the Spark context
     val conf = new SparkConf()
       .setAppName("preprocessing")
-      .setMaster("local")
+      .setMaster("yarn-cluster")
     val sc = new SparkContext(conf)
     
     val states_path = args(0)
@@ -178,6 +178,7 @@ object preprocessing {
     //------- Split the lines with comma, change the delimeter if needed -------
     var data_splitted = data
     .filter { line => line != data_header }
+    .sortBy(x => x)
     .map { line => line.split(",") }
     .map { row => clean(row, states_schema) }
     var summary_data_splitted = summary_data.filter { line => line != summary_header }
