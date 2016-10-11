@@ -13,12 +13,12 @@ object thisIsTheArc extends preprocess {
   
   def main(args: Array[String]) = {
     // Start time
-    val start_time = new java.util.Date()
+    val start_time = System.currentTimeMillis()
     
     //Start the Spark context
     val conf = new SparkConf()
-      .setAppName("preprocessing")
-      .setMaster("yarn-cluster")
+      .setAppName("group2-scala-app")
+      .setMaster("local") // TODO: Change to "yarn-cluster" before package the jar to lab server 
     val sc = new SparkContext(conf)
     
     if (args.length != 6) {
@@ -102,6 +102,25 @@ object thisIsTheArc extends preprocess {
       case _ => "Unknown"
     })
     
+    val udfGetAgeBucket = udf((age: Float) => age.round match {
+      case i if i == 0 => "Unknown"
+      case i if i >= 16 && i <= 18 => "High School"
+      case i if i >= 19 && i <= 22 => "College"
+      case i if i >= 23 && i <= 25 => "Post-College"
+      case i if i >= 26 && i <= 30 => "late 20s"
+      case i if i >= 31 && i <= 40 => "30s"
+      case i if i >=41 => "old"
+      case _ => "invalid"
+      
+    })
+    
+    val udfGetFirst3Char = udf((zipc: String) => zipc match {
+      case i if i.isInstanceOf[String] => i.substring(0, 3)
+      case _ => "invalid"
+      
+    })
+    
+    
     //------- Convert the schema JSON to StructType schema and add donation_cnt and repeat_donor for states data -------
     val states_structtype = createStructType(states_schema)
     .add(StructField("donation_cnt", IntegerType, true))
@@ -127,6 +146,10 @@ object thisIsTheArc extends preprocess {
     .withColumn("donation_year", udfGetDonateYear(states_summary_df("donation_dt")))
     .withColumn("donation_month", udfGetDonateMonth(states_summary_df("donation_dt")))
     .withColumn("donation_season", udfGetDonateSeason(states_summary_df("donation_dt")))
+    .withColumn("site_zip3", udfGetFirst3Char(states_summary_df("site_zip")))
+    .withColumn("donor_zip3", udfGetFirst3Char(states_summary_df("zip5c")))
+    
+    states_summary_df = states_summary_df.withColumn("age_bucket", udfGetAgeBucket(states_summary_df("age_at_donation")))
     
     // TODO: Uncomment the following line if need to save mixed dataset
     states_summary_df.repartition(1).write.format("com.databricks.spark.csv").option("header", "true")
