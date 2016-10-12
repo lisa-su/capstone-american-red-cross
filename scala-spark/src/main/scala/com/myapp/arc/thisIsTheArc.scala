@@ -28,7 +28,7 @@ object thisIsTheArc extends preprocess {
     
     //------ Set parameters ------
     val states_path = args(0); val summary_path = args(1); val schemas_folder = args(2)
-    val output_path = args(3); val sample_pct = args(4).toFloat; val seed = args(5).toInt
+    val output_path = args(3); val sample_pct = args(4).toFloat; val seed = args(5).toLong
     
     //--------------------------------------------------------------
     //          First process the csv file with RDD
@@ -154,17 +154,14 @@ object thisIsTheArc extends preprocess {
     // TODO: Uncomment the following line if need to save mixed dataset
     states_summary_df.repartition(1).write.format("com.databricks.spark.csv").option("header", "true")
     .save(output_path + start_time + "_" + sample_pct + "_" + seed + "_sample_data")
-           
+    
+    val toML = new arcMl()
+    
+    
+    
+    
     //Stop the Spark context
     sc.stop
-    
-    
-    
-    
-    
-    
-    
-    
   }
   
 }

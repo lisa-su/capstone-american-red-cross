@@ -9,7 +9,7 @@ import org.apache.spark.sql.Row
 import org.apache.spark.sql.types._
 import net.liftweb.json._
 
-class preprocess {
+trait preprocess {
   case class fieldDtype(field: String, dtype: String)
   case class DataTypeInvalidException(smth:String)  extends Exception(smth)
   
