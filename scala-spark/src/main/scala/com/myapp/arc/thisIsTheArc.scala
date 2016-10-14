@@ -8,6 +8,10 @@ import org.apache.spark.sql.SQLContext
 import org.apache.spark.sql.Row
 import org.apache.spark.sql.types._
 import net.liftweb.json._
+import java.io._
+import org.apache.log4j.{Logger, Level}
+import org.apache.spark.ml.clustering._
+
 
 object thisIsTheArc extends preprocess {
   
@@ -20,6 +24,9 @@ object thisIsTheArc extends preprocess {
       .setAppName("group2-scala-app")
       .setMaster("local") // TODO: Change to "yarn-cluster" before package the jar to lab server 
     val sc = new SparkContext(conf)
+    
+    val rootLogger = Logger.getRootLogger()
+    rootLogger.setLevel(Level.ERROR)
     
     if (args.length != 6) {
       println("Arguments required: <path of states data> <path of summary data> <path of schema folder> <path of output folder> <percentage of sample size> <random seed>")
@@ -81,7 +88,6 @@ object thisIsTheArc extends preprocess {
     
     //------- Create sample data -------
     val sample_data = data_cleaned.filter { row => sample_donors.contains(row.get(0)) }
-    
     
     //--------------------------------------------------------------
     //          Use SQL to merge states and summary data
@@ -155,7 +161,47 @@ object thisIsTheArc extends preprocess {
     states_summary_df.repartition(1).write.format("com.databricks.spark.csv").option("header", "true")
     .save(output_path + start_time + "_" + sample_pct + "_" + seed + "_sample_data")
     
-    val toML = new arcMl()
+    states_summary_df.registerTempTable("sample_data")
+    
+    
+    //------ Spark ML ------
+    
+    //------ Interested in donor's first donation -----
+    
+    var ml_result_path = output_path + start_time + "_mlResult/"
+    
+    if (!new File(ml_result_path).isDirectory()) {
+      new File(ml_result_path).mkdirs()
+    }
+    
+    val features = Array("donation_year", "donation_season", "age_bucket", "walk_in_ind", "donation_type",
+        "deferral_ind", "sponsor_category", "race", "gender", "site_zip3", "repeat_donor")
+        
+    val string_features = Array("donation_season", "age_bucket", "donation_type", "sponsor_category", "race", "gender", "site_zip3")
+    
+    val ml_data = sqlcontext.sql(s"SELECT ${features.mkString(",")}, repeat_donor FROM sample_data WHERE first_donat_ind = 1 AND donation_order = 1")
+    
+    val ml_km = new arcMl().setFeatureSet_(features).setStringFeatureList_(string_features)
+    
+    val transformed_ml_data = ml_km.transform(ml_data)
+    
+    transformed_ml_data.repartition(1).write.format("com.databricks.spark.csv").option("header", "true").save(ml_result_path + "ml_data")
+    
+    val pw = new PrintWriter(new File(ml_result_path + "kmeans_result.csv" ))
+    pw.write("K,WSSSE,Centers\n")
+    
+    var m = ml_km.kmean(transformed_ml_data, 2, 10)
+    for (i <- 15 to 30){
+      m = ml_km.kmean(transformed_ml_data, i, 10)
+      println("Number of Cluster: " + i)
+      pw.write(i.toString() + ",")
+      println("Within Set Sum of Squared Errors: " + m.computeCost(transformed_ml_data).toString())
+      pw.write(m.computeCost(transformed_ml_data).toString() + ",")
+      pw.write("\"" + m.clusterCenters.mkString("\";\"") + "\"")
+    }
+    
+    pw.close
+   
     
     
     
