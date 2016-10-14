@@ -3,82 +3,111 @@ package com.myapp.arc
 import org.apache.spark.ml.{Pipeline, PipelineModel}
 import org.apache.spark.ml.feature._
 import org.apache.spark.ml.classification.LogisticRegression
-import org.apache.spark.ml.clustering.KMeans
+import org.apache.spark.ml.clustering._
 import org.apache.spark.ml.feature.{HashingTF, Tokenizer}
 import org.apache.spark.mllib.linalg.Vector
 import org.apache.spark.sql.Row
 import org.apache.spark.sql.DataFrame
+import java.io._
 
 class arcMl {
-  var train_pct = .75
-  var seed = 52.toLong
-  var feature_set = Array[String]()
-  var string_features = Array[String]()
-  var id_column = "arc_id"
+  private var _target = ""
+  private var _train_pct = .75
+  private var _seed = 52.toLong
+  private var _feature_set = Array[String]()
+  private var _string_features = Array[String]()
+  private var _id_column = "arc_id"
+  private var _cv_fold = 10 
   
-  def setTrainPct(p: Double) = {
-    train_pct = p
+  //------ Setters ------
+  def setTrainPct_(p: Double): this.type = {
+    this._train_pct = p
+    this
+  }
+
+  def setSeet_(s: Long): this.type = {
+    this._seed = s
+    this
   }
   
-  def getTrainPct(): Double = {
-    return train_pct
+  def setCvFold_(n: Int): this.type = {
+    this._cv_fold = n
+    this
   }
   
-  def setSeet(s: Long) = {
-    seed = s
+  def setFeatureSet_(l: Array[String]): this.type = {
+    this._feature_set = l
+    this
   }
   
-  def setFeatureSet(l: Array[String]) = {
-    feature_set = l
+  def setStringFeatureList_(l: Array[String]): this.type = {
+    this._string_features = l
+    this
   }
   
-  def getFeatureSet(): Array[String] = {
-    return feature_set
+  def setIdColumn_(s: String): this.type = {
+    this._id_column = s
+    this
   }
   
-  def setStringFeatureList(l: Array[String]) = {
-    string_features = l
+  def setTarget_(s: String): this.type = {
+    this._target = s
+    this
   }
   
-  def setStringFeatureList(): Array[String] = {
-    return string_features
-  }
+  //------ Getters ------
+  def getTrainPct = _train_pct
   
-  def setIdColumn(s: String) = {
-    id_column = s
-  }
+  def getCvFold = _cv_fold
   
-  def getIdColumn(): String = {
-    return id_column
-  }
+  def getFeatureSet = _feature_set
   
-  def transorm(d: DataFrame): DataFrame = {
+  def getStringFeatureList = _string_features
+  
+  def getIdColumn = _id_column
+  
+  def getTarget = _target
+  
+  //start_time is an index for folder names
+  def transform(d: DataFrame): DataFrame = {
+    
     var data = d
-    if (string_features.length != 0) {
+    
+    if (_string_features.length != 0) {
+      data = data.na.fill("__null__", _string_features)
       var stringIndexer = new StringIndexer()
-      for (f <- string_features){
+      var stringIndex = Array[String]()
+      
+      for (f <- _string_features){
         stringIndexer = stringIndexer.setInputCol(f).setOutputCol(f + "_index")
         data = stringIndexer.fit(data).transform(data)
-        feature_set(feature_set.indexOf(f)) = f + "_index"
+        _feature_set(_feature_set.indexOf(f)) = f + "_index"
       }
     }
-    
-    val assembler = new VectorAssembler().setInputCols(feature_set).setOutputCol("features")
+
+    val assembler = new VectorAssembler().setInputCols(_feature_set).setOutputCol("features")
     
     data = assembler.transform(data)
     
     return data
   }
   
-  def kmean(df: DataFrame, k: Int) = {
+  // start_time is an index for folder names
+  def kmean(df: DataFrame, k: Int, iterNum: Int): KMeansModel = {
     // Trains a k-means model
-    val kmeans = new KMeans().setK(k)
+    val kmeans = new KMeans().setK(k).setMaxIter(iterNum).setSeed(_seed)
   
     val model = kmeans.fit(df)
     
-    // Shows the result
-    println("Final Centers: ")
-    model.clusterCenters.foreach(println)
+//    // Evaluate clustering by computing Within Set Sum of Squared Errors.
+//    val WSSSE = model.computeCost(df)
+//    println(s"Within Set Sum of Squared Errors = $WSSSE")
+//    
+//    // Shows the result
+//    println("Final Centers: ")
+//    model.clusterCenters.foreach(println)
+    
+    return model
   }
   
   
