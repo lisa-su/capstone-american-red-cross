@@ -65,32 +65,36 @@ trait preprocess {
     def validate(x: (String, fieldDtype) ): Any = { // x: (value, field_dtype)
       var new_x = x._1.trim()
       val d = x._2
-      if (null_val.contains(new_x.toLowerCase()) || new_x == null) {
-        return null
-      } else {
-        if (d.dtype == "string" && !d.field.contains("abbr")) {
-          return new_x.capitalize
-        } else if (List("Latitude","Longitude").contains(d.field) && new_x == "0"){
-          return null
-        } else if (d.dtype != "string") {
-          if (d.dtype == "integer"){
-            return new_x.toInt
-          } else if (d.dtype == "float") {
-            return new_x.toFloat
-          } else if (d.dtype == "date" && new_x.contains("-")) {
-            val format = new java.text.SimpleDateFormat("yyyy-MM-dd")
-            val date = java.sql.Date.valueOf(new_x)
-            return date
-          } else if (d.dtype == "date" && new_x.contains("/")) {
-            val format = new java.text.SimpleDateFormat("yyyy/MM/dd")
-            val date = new java.sql.Date(format.parse(new_x).getDate)
-            return date
+      try {
+          if (null_val.contains(new_x.toLowerCase()) || new_x == null) {
+            return null
           } else {
-            throw new DataTypeInvalidException("\n------\n" + d + "\nvalue: " + x + "\n------")
+            if (d.dtype == "string" && !d.field.contains("abbr")) {
+              return new_x.capitalize
+            } else if (List("Latitude","Longitude").contains(d.field) && new_x == "0"){
+              return null
+            } else if (d.dtype != "string") {
+              if (d.dtype == "integer"){
+                return new_x.toInt
+              } else if (d.dtype == "float") {
+                return new_x.toFloat
+              } else if (d.dtype == "date" && new_x.contains("-")) {
+                val format = new java.text.SimpleDateFormat("yyyy-MM-dd")
+                val date = java.sql.Date.valueOf(new_x.replaceAll("\"", ""))
+                return date
+              } else if (d.dtype == "date" && new_x.contains("/")) {
+                val format = new java.text.SimpleDateFormat("yyyy/MM/dd")
+                val date = new java.sql.Date(format.parse(new_x.replaceAll("\"", "")).getTime)
+                return date
+              } else {
+                throw new DataTypeInvalidException("\n------\n" + d + "\nvalue: " + x + "\n------")
+              }
+            } else {
+              return new_x
+            }
           }
-        } else {
-          return new_x
-        }
+      } catch {
+        case _: Throwable => return null
       }
     }
     val matched = row zip fields
