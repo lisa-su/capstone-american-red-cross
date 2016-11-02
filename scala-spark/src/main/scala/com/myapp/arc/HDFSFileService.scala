@@ -20,7 +20,7 @@ trait HDFSFileService {
 
   def saveFile(filepath: String, data: Array[Byte]): Unit = {
     val file = new File(filepath)
-    val out = fileSystem.create(new Path(file.getName))
+    val out = fileSystem.create(new Path(filepath))
     val in = new BufferedInputStream(new FileInputStream(file))
     var b = data
     var numBytes = in.read(b)

@@ -129,11 +129,19 @@ trait preprocess {
   
   //------- Function to calculate the donor's age at respective donation -------
   def calAgeAtDonation(donation_dt: java.sql.Date, birth_dt: java.sql.Date): Float = {
-    if (donation_dt != null && birth_dt != null) {
-      return (donation_dt.getTime - donation_dt.getTime) / (1000 * 60 * 60 * 24 * 365)
-    } else {
-      return 0  
+    
+    try {
+      return java.time.Duration.between(birth_dt.toLocalDate().atTime(0,0), donation_dt.toLocalDate().atTime(0,0)).toDays().toFloat/365
+      
+    } catch {
+      case e: Throwable => println(e.getMessage) ;return 0
     }
+    
+//    if (donation_dt != null && birth_dt != null) {
+//      return (donation_dt.getTime - donation_dt.getTime) / (1000 * 60 * 60 * 24 * 365)
+//    } else {
+//      return 0
+//    }
   }
 
   //------- Function to count the order of the donation from the same donor -------
@@ -148,5 +156,20 @@ trait preprocess {
       }      
     return cnt
   }
+  
+  //------- Function to calculate elapsed time since last donation --------
+  var lasttime = java.sql.Date.valueOf(java.time.LocalDate.now())
+  def calDonateElapse(this_id: String, donation_dt: java.sql.Date): Float = {
+    if (!this_id.equals(id)) {
+      id = this_id.toString()
+      lasttime = donation_dt
+    }
+    val elapse = java.time.Duration.between(lasttime.toLocalDate().atTime(0, 0), donation_dt.toLocalDate().atTime(0, 0)).toDays().toFloat
+    lasttime = donation_dt
+    
+    return elapse
+  }
+  
+  
   
 }
