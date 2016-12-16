@@ -173,7 +173,7 @@ object thisIsTheArc extends preprocess with HDFSFileService{
       
       val udfGetFirst3Char = udf((zipc: String) => zipc match {
         case i if i.isInstanceOf[String] && i.length == 5 => i.substring(0, 3)
-        case i if i.isInstanceOf[String] => leftPad(i,5,"0").substring(0, 3)
+        case i if i.isInstanceOf[String] && i.length < 5 => leftPad(i,5,"0").substring(0, 3)
         case _ => "invalid"
         
       })
